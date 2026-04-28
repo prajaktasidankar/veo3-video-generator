@@ -8,11 +8,13 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+from models.metadata_log import save_metadata
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _TEMP_OUTPUTS = _PROJECT_ROOT / "temp_outputs"
@@ -34,7 +36,7 @@ def get_client() -> genai.Client:
     key = os.environ.get("GOOGLE_API_KEY", "").strip()
     if not key:
         raise EnvironmentError(
-            "GOOGLE_API_KEY is not set. Copy .env.example to .env and add your API key."
+            "GOOGLE_API_KEY is not set. Copy .env.example to `.env` and add your API key."
         )
     return genai.Client(api_key=key)
 
@@ -81,7 +83,6 @@ def generate_video_veo(
     prompt: str,
     aspect_ratio: str,
     duration_seconds: int,
-    include_audio: bool,
     *,
     image_path: str | None = None,
     model: str = VEO_MODEL,
@@ -93,13 +94,13 @@ def generate_video_veo(
         prompt: Optional motion / scene description (SDK allows image without text).
         aspect_ratio: ``\"16:9\"`` or ``\"9:16\"``.
         duration_seconds: Clip length (e.g. 4, 6, 8).
-        include_audio: Whether to request generated audio (``GenerateVideosConfig.generate_audio``).
         image_path: Local path to the source image (required).
         model: Model id (default Veo 3.1 preview).
         on_progress: Optional callback invoked with human-readable status messages.
 
     Returns:
-        Absolute path to the saved ``.mp4`` file.
+        Absolute path to the saved ``.mp4`` file. A matching ``<stem>.json`` is
+        written next to the MP4 via :func:`save_metadata`.
     """
     if aspect_ratio not in ("16:9", "9:16"):
         raise ValueError('aspect_ratio must be "16:9" or "9:16".')
@@ -171,4 +172,17 @@ def generate_video_veo(
     out_path.write_bytes(data)
 
     notify(f"Saved to {out_path.name}")
+
+    metadata: dict[str, Any] = {
+        "model_id": model,
+        "prompt": motion,
+        "image_input_used": True,
+        "settings": {
+            "duration": duration_seconds,
+            "aspect_ratio": aspect_ratio,
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    save_metadata(out_path, metadata)
+
     return str(out_path.resolve())
